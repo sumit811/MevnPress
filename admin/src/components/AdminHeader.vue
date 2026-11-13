@@ -1,7 +1,16 @@
 <script setup>
-import { ChevronDown, Menu } from '@lucide/vue';
+import { ChevronDown, LogOut, Menu } from '@lucide/vue';
+import { useRouter } from 'vue-router';
+import { useAuthStore } from '../stores/auth';
 
 defineEmits(['toggle-navigation']);
+const auth = useAuthStore();
+const router = useRouter();
+
+function signOut() {
+  auth.signOut();
+  router.replace('/login');
+}
 </script>
 
 <template>
@@ -12,7 +21,7 @@ defineEmits(['toggle-navigation']);
     <button class="admin-bar__mobile-menu icon-button" type="button" aria-label="Toggle navigation" @click="$emit('toggle-navigation')"><Menu :size="17" /></button>
     <div class="admin-bar__tools">
       <span class="admin-bar__site">Site Admin</span>
-      <span class="admin-bar__account"><span class="avatar">A</span> admin <ChevronDown :size="14" /></span>
+      <button class="admin-bar__account" type="button" title="Sign out" @click="signOut"><span class="avatar">{{ auth.user?.username?.slice(0, 1).toUpperCase() || 'A' }}</span> {{ auth.user?.username || 'Admin' }} <ChevronDown :size="14" /><LogOut class="admin-bar__logout" :size="14" /></button>
     </div>
   </header>
 </template>
@@ -31,7 +40,6 @@ defineEmits(['toggle-navigation']);
   background: #1d2327;
 
   &__brand,
-  &__account,
   &__tools {
     display: flex;
     align-items: center;
@@ -57,9 +65,22 @@ defineEmits(['toggle-navigation']);
 
   &__account {
     height: 100%;
+    display: flex;
+    align-items: center;
     gap: 7px;
     padding: 0 7px;
+    border: 0;
     color: #f0f0f1;
+    background: transparent;
+
+    &:hover {
+      color: #72aee6;
+      background: #2c3338;
+    }
+  }
+
+  .admin-bar__logout {
+    margin-left: 3px;
   }
 
   &__mobile-menu {

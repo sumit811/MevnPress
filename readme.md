@@ -75,6 +75,50 @@ npm start
 
 The server logs that it is listening on the selected port and reports whether MongoDB connected. The API base URL is `http://localhost:5000` when using the default port.
 
+## Restarting After Changes
+
+### Express or Mongoose code changes
+
+The backend runs with `node server.js` and does not automatically reload changed files. In the terminal where it is running, press `Ctrl+C`, then start it again from the backend directory:
+
+```sh
+cd backend
+npm start
+```
+
+Wait for both `Server running on port 5000` and `MongoDB Connected` before sending requests from Thunder Client. Restarting the API is enough after editing Express routes, `server.js`, or a Mongoose schema. You do not need to restart MongoDB for ordinary code or schema edits.
+
+If the API reports that port `5000` is already in use, find the process using it:
+
+```sh
+lsof -nP -iTCP:5000 -sTCP:LISTEN
+```
+
+Stop only the Node process that is the old MervnPress API, using its PID from the output, then run `npm start` again from `backend/`:
+
+```sh
+kill 12345
+cd backend
+npm start
+```
+
+Replace `12345` with the PID shown by `lsof`. Prefer `Ctrl+C` in the server's own terminal when that terminal is available.
+
+### Local MongoDB service
+
+MongoDB usually stays running while the API is restarted. Check its status or restart it only if it is stopped, unresponsive, or you changed its service configuration:
+
+```sh
+brew services list
+brew services restart mongodb-community
+```
+
+If it is stopped rather than running, start it with `brew services start mongodb-community`. After restarting MongoDB, start or restart the API from `backend/` and wait for its `MongoDB Connected` message. These Homebrew commands apply only to a local MongoDB Community Server; MongoDB Atlas has no local database service to restart.
+
+### Schema and existing data
+
+A Mongoose schema change affects how the application validates and reads documents, but it does not automatically rewrite existing MongoDB documents. If a change requires existing records to be transformed or indexes to be updated, create and run an explicit migration. Restarting MongoDB alone does not apply a Mongoose schema change.
+
 ## API
 
 All current routes are mounted under `/api`:
@@ -127,5 +171,6 @@ Vite proxies `/api` requests to `http://localhost:5000` by default. Set `VITE_AP
 ## Troubleshooting
 
 - **MongoDB connection error:** confirm MongoDB is running with `brew services list`, and verify `MONGO_URI` in `backend/.env`.
+- **`MONGO_URI` is undefined:** run the backend from `backend/` with `npm start` so dotenv loads `backend/.env`.
 - **Address already in use:** set `PORT` in `backend/.env` to another available port and use that port in API requests.
 - **`npm ci` fails:** confirm you are in the appropriate project directory (`backend/`) and that Node.js and npm are installed.

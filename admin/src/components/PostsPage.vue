@@ -1,521 +1,209 @@
 <script setup>
-import {
-  ArrowDown,
-  ArrowUp,
-  ChevronDown,
-  CircleHelp,
-  Pencil,
-  Plus,
-  Search,
-  Trash2
-} from '@lucide/vue';
+import { computed, onMounted, ref, watch } from 'vue';
+import { useRouter } from 'vue-router';
+import { ChevronLeft, ChevronRight, Search } from '@lucide/vue';
 
-defineProps({
-  posts: { type: Array, required: true },
-  statusTabs: { type: Array, required: true },
-  activeStatus: { type: String, required: true },
-  searchInput: { type: String, required: true },
-  selectedIds: { type: Array, required: true },
-  allVisibleSelected: { type: Boolean, required: true },
-  bulkAction: { type: String, required: true },
-  sortDirection: { type: String, required: true },
-  isLoading: { type: Boolean, required: true },
-  loadError: { type: String, required: true }
-});
-
-defineEmits([
-  'add-post', 'edit-post', 'change-status', 'trash-post', 'apply-bulk-action',
-  'retry', 'select-status', 'update-search', 'submit-search', 'toggle-all',
-  'toggle-selected', 'update-bulk-action', 'toggle-sort'
+const router = useRouter();
+const posts = ref([]);
+const categories = ref([]);
+const counts = ref({ all: 0, publish: 0, draft: 0, trash: 0 });
+const currentPage = ref(1);
+const totalPages = ref(1);
+const totalItems = ref(0);
+const perPage = ref(20);
+const searchInput = ref('');
+const searchQuery = ref('');
+const selectedStatus = ref('all');
+const selectedDate = ref('');
+const selectedCategory = ref('');
+const selectedIds = ref([]);
+const bulkAction = ref('');
+const loading = ref(false);
+const errorMessage = ref('');
+const optionsOpen = ref(false);
+const columns = ref({ author: true, category: true, tags: true, comments: true, date: true });
+const statuses = computed(() => [
+    { key: 'all', label: 'All', count: counts.value.all },
+    { key: 'publish', label: 'Published', count: counts.value.publish },
+    { key: 'draft', label: 'Draft', count: counts.value.draft },
+    { key: 'trash', label: 'Trash', count: counts.value.trash }
 ]);
+const dates = computed(() => Array.from({ length: 12 }, (_, index) => {
+    const date = new Date();
+    date.setDate(1);
+    date.setMonth(date.getMonth() - index);
+    const value = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+    return { value, label: new Intl.DateTimeFormat('en', { month: 'long', year: 'numeric' }).format(date) };
+}));
+const allSelected = computed(() => posts.value.length > 0 && posts.value.every((post) => selectedIds.value.includes(post._id)));
+const columnCount = computed(() => 2 + Object.values(columns.value).filter(Boolean).length);
+const firstItem = computed(() => totalItems.value ? (currentPage.value - 1) * perPage.value + 1 : 0);
+const lastItem = computed(() => Math.min(currentPage.value * perPage.value, totalItems.value));
+
+async function request(path, options = {}) {
+    const response = await fetch(`/api${path}`, {
+        ...options,
+        headers: { 'Content-Type': 'application/json', ...options.headers }
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || 'The request failed.');
+    return result;
+}
+
+async function loadPosts(targetPage = currentPage.value) {
+    loading.value = true;
+    errorMessage.value = '';
+    selectedIds.value = [];
+    const params = new URLSearchParams({ type: 'post', page: String(targetPage), perPage: String(perPage.value) });
+    if (selectedStatus.value !== 'all') params.set('status', selectedStatus.value);
+    if (selectedDate.value) params.set('date', selectedDate.value);
+    if (selectedCategory.value) params.set('category', selectedCategory.value);
+    if (searchQuery.value) params.set('search', searchQuery.value);
+    try {
+        const result = await request(`/admin/posts?${params}`);
+        posts.value = result.items;
+        counts.value = result.counts;
+        totalItems.value = result.total;
+        totalPages.value = result.totalPages;
+        currentPage.value = result.page;
+    } catch (error) {
+        errorMessage.value = error.message || 'Could not load posts.';
+    } finally {
+        loading.value = false;
+    }
+}
+
+async function loadCategories() {
+    try {
+        categories.value = await request('/admin/categories');
+    } catch (error) {
+        errorMessage.value = error.message || 'Could not load categories.';
+    }
+}
+
+function searchPosts() {
+    searchQuery.value = searchInput.value.trim();
+    loadPosts(1);
+}
+
+async function applyBulkAction() {
+    if (!bulkAction.value || !selectedIds.value.length) return;
+    if (bulkAction.value === 'delete' && !window.confirm(`Permanently delete ${selectedIds.value.length} selected posts?`)) return;
+    try {
+        await request('/admin/posts/bulk', {
+            method: 'POST',
+            body: JSON.stringify({ ids: selectedIds.value, type: 'post', action: bulkAction.value })
+        });
+        bulkAction.value = '';
+        await loadPosts(currentPage.value);
+    } catch (error) {
+        errorMessage.value = error.message || 'Could not apply the bulk action.';
+    }
+}
+
+async function setStatus(post, status) {
+    try {
+        await request(`/admin/posts/${post._id}?type=post`, { method: 'PATCH', body: JSON.stringify({ status }) });
+        await loadPosts(currentPage.value);
+    } catch (error) {
+        errorMessage.value = error.message || 'Could not update the post.';
+    }
+}
+
+async function deletePost(post) {
+    if (!window.confirm(`Permanently delete "${post.title}"?`)) return;
+    try {
+        await request(`/admin/posts/${post._id}?type=post&force=true`, { method: 'DELETE' });
+        await loadPosts(currentPage.value);
+    } catch (error) {
+        errorMessage.value = error.message || 'Could not delete the post.';
+    }
+}
 
 function formatDate(value) {
-  if (!value) return '—';
-  return new Intl.DateTimeFormat('en', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value));
+    const date = new Date(value);
+    return value && !Number.isNaN(date.getTime()) ? new Intl.DateTimeFormat('en', { dateStyle: 'medium', timeStyle: 'short' }).format(date) : '—';
 }
 
-function statusLabel(status) {
-  return status === 'publish' ? 'Published' : status === 'draft' ? 'Draft' : 'Trash';
-}
+watch([selectedStatus, selectedDate, selectedCategory, perPage], () => loadPosts(1));
+onMounted(() => { loadCategories(); loadPosts(1); });
 </script>
 
 <template>
-  <div class="screen-header">
-    <div class="screen-header__title"><h1>Posts</h1><button class="button button--primary-outline" type="button" @click="$emit('add-post')"><Plus :size="15" /> Add Post</button></div>
-    <div class="screen-header__utility"><button type="button"><ChevronDown :size="14" /> Screen Options</button><button type="button"><CircleHelp :size="14" /> Help</button></div>
-  </div>
-
-  <div class="list-toolbar">
-    <div class="status-tabs" aria-label="Filter by post status">
-      <template v-for="(tab, index) in statusTabs" :key="tab.key">
-        <span v-if="index" class="status-tabs__separator">|</span>
-        <button type="button" :class="{ 'status-tabs__active': activeStatus === tab.key }" @click="$emit('select-status', tab.key)">{{ tab.label }} <span>({{ tab.count }})</span></button>
-      </template>
-    </div>
-    <form class="search-form" @submit.prevent="$emit('submit-search')">
-      <label class="visually-hidden" for="post-search">Search posts</label>
-      <input id="post-search" type="search" :value="searchInput" @input="$emit('update-search', $event.target.value)" />
-      <button class="button button--primary-outline" type="submit"><Search :size="15" /><span>Search Posts</span></button>
-    </form>
-  </div>
-
-  <div class="filter-toolbar">
-    <div class="filter-toolbar__actions">
-      <label class="visually-hidden" for="bulk-action">Bulk actions</label>
-      <select id="bulk-action" :value="bulkAction" @change="$emit('update-bulk-action', $event.target.value)">
-        <option value="">Bulk actions</option><option value="publish">Publish</option><option value="draft">Move to draft</option><option value="trash">Move to trash</option>
-      </select>
-      <button class="button button--primary-outline" type="button" :disabled="!bulkAction || selectedIds.length === 0" @click="$emit('apply-bulk-action')">Apply</button>
-    </div>
-    <div class="filter-toolbar__filters">
-      <label class="visually-hidden" for="date-filter">Filter by date</label><select id="date-filter" disabled><option>All dates</option></select>
-      <label class="visually-hidden" for="category-filter">Filter by category</label><select id="category-filter" disabled><option>All Categories</option></select>
-      <button class="button button--primary-outline" type="button" disabled>Filter</button>
-    </div>
-    <span class="result-count">{{ posts.length }} item{{ posts.length === 1 ? '' : 's' }}</span>
-  </div>
-
-  <div class="posts-table-wrap">
-    <table class="posts-table">
-      <thead><tr>
-        <th class="check-column"><input type="checkbox" aria-label="Select all posts" :checked="allVisibleSelected" @change="$emit('toggle-all')" /></th>
-        <th class="title-column"><button class="sort-button sort-button--active" type="button" @click="$emit('toggle-sort')">Title <ArrowDown v-if="sortDirection === 'desc'" :size="13" /><ArrowUp v-else :size="13" /></button></th>
-        <th>Author</th><th>Categories</th><th>Date</th>
-      </tr></thead>
-      <tbody>
-        <tr v-if="isLoading"><td colspan="5" class="table-message">Loading posts…</td></tr>
-        <tr v-else-if="loadError"><td colspan="5" class="table-message table-message--error"><span>{{ loadError }}</span><button class="button button--primary-outline" type="button" @click="$emit('retry')">Retry</button></td></tr>
-        <tr v-else-if="posts.length === 0"><td colspan="5" class="table-message">No posts found.</td></tr>
-        <template v-else>
-          <tr v-for="post in posts" :key="post._id" class="post-row" :class="{ 'post-row--selected': selectedIds.includes(post._id) }">
-            <td class="check-column"><input type="checkbox" :aria-label="`Select ${post.title}`" :checked="selectedIds.includes(post._id)" @change="$emit('toggle-selected', post._id)" /></td>
-            <td class="title-column">
-              <div class="post-title-line"><button class="post-title" type="button" @click="$emit('edit-post', post)">{{ post.title }}</button><span v-if="post.status !== 'publish'" class="status-badge" :class="`status-badge--${post.status}`">{{ statusLabel(post.status) }}</span></div>
-              <div class="row-actions">
-                <button type="button" @click="$emit('edit-post', post)"><Pencil :size="13" /> Edit</button><span>|</span>
-                <button type="button" @click="$emit('change-status', post, post.status === 'publish' ? 'draft' : 'publish')">{{ post.status === 'publish' ? 'Unpublish' : 'Publish' }}</button><span>|</span>
-                <button class="row-actions__delete" type="button" @click="$emit('trash-post', post)"><Trash2 :size="13" /> Trash</button>
-              </div>
-            </td>
-            <td><a href="#author">admin</a></td><td><a href="#category">{{ post.category || 'Uncategorized' }}</a></td><td><span class="date-status">{{ statusLabel(post.status) }}</span><br />{{ formatDate(post.createdAt) }}</td>
-          </tr>
-        </template>
-      </tbody>
-      <tfoot><tr>
-        <th class="check-column"><input type="checkbox" aria-label="Select all posts" :checked="allVisibleSelected" @change="$emit('toggle-all')" /></th>
-        <th><button class="sort-button sort-button--active" type="button" @click="$emit('toggle-sort')">Title <ArrowDown v-if="sortDirection === 'desc'" :size="13" /><ArrowUp v-else :size="13" /></button></th>
-        <th>Author</th><th>Categories</th><th>Date</th>
-      </tr></tfoot>
-    </table>
-  </div>
-
-  <div class="bottom-toolbar">
-    <div class="filter-toolbar__actions">
-      <label class="visually-hidden" for="bulk-action-bottom">Bulk actions</label>
-      <select id="bulk-action-bottom" :value="bulkAction" @change="$emit('update-bulk-action', $event.target.value)"><option value="">Bulk actions</option><option value="publish">Publish</option><option value="draft">Move to draft</option><option value="trash">Move to trash</option></select>
-      <button class="button button--primary-outline" type="button" :disabled="!bulkAction || selectedIds.length === 0" @click="$emit('apply-bulk-action')">Apply</button>
-    </div>
-    <span class="result-count">{{ posts.length }} item{{ posts.length === 1 ? '' : 's' }}</span>
-  </div>
+    <section class="posts-screen" aria-labelledby="posts-title">
+        <div class="posts-screen__tools">
+            <button class="button" type="button" :aria-expanded="optionsOpen" @click="optionsOpen = !optionsOpen">Screen Options <span aria-hidden="true">⌄</span></button>
+        </div>
+        <section v-if="optionsOpen" class="posts-options" aria-label="Screen Options">
+            <div><h2>Columns</h2><label v-for="(enabled, key) in columns" :key="key"><input v-model="columns[key]" type="checkbox" /> {{ key[0].toUpperCase() + key.slice(1) }}</label></div>
+            <label>Number of items per page <input v-model.number="perPage" type="number" min="1" max="100" /></label>
+        </section>
+        <header class="posts-heading">
+            <div><h1 id="posts-title">Posts</h1><button class="button button--primary-outline" type="button" @click="router.push('/posts/new')">Add Post</button></div>
+            <nav class="posts-status" aria-label="Filter posts by status">
+                <button v-for="(status, index) in statuses" :key="status.key" type="button" :class="{ 'is-active': selectedStatus === status.key }" @click="selectedStatus = status.key">{{ status.label }} ({{ status.count }})<span v-if="index < statuses.length - 1"> | </span></button>
+            </nav>
+        </header>
+        <div v-if="errorMessage" class="posts-error" role="alert">{{ errorMessage }} <button class="button" type="button" @click="loadPosts(currentPage)">Retry</button></div>
+        <div class="posts-toolbar">
+            <div class="posts-toolbar__filters">
+                <select v-model="bulkAction" aria-label="Bulk action"><option value="">Bulk actions</option><option value="trash">Move to Trash</option><option value="publish">Publish</option><option value="draft">Set to Draft</option><option value="delete">Delete permanently</option></select>
+                <button class="button" type="button" :disabled="!bulkAction || !selectedIds.length" @click="applyBulkAction">Apply</button>
+                <select v-model="selectedDate" aria-label="Filter by date"><option value="">All dates</option><option v-for="date in dates" :key="date.value" :value="date.value">{{ date.label }}</option></select>
+                <select v-model="selectedCategory" aria-label="Filter by category"><option value="">All Categories</option><option v-for="category in categories" :key="category._id" :value="category.name">{{ category.name }}</option></select>
+                <button class="button" type="button" @click="loadPosts(1)">Filter</button>
+            </div>
+            <form class="posts-search" role="search" @submit.prevent="searchPosts"><input v-model="searchInput" type="search" aria-label="Search posts" /><button class="button button--primary-outline" type="submit"><Search :size="15" /> Search Posts</button></form>
+        </div>
+        <div class="posts-summary"><span>{{ totalItems }} {{ totalItems === 1 ? 'item' : 'items' }}</span><div class="posts-pagination"><span>{{ firstItem }}-{{ lastItem }} of {{ totalItems }}</span><button class="icon-button" aria-label="Previous page" :disabled="currentPage <= 1 || loading" @click="loadPosts(currentPage - 1)"><ChevronLeft :size="16" /></button><span>{{ currentPage }} of {{ totalPages }}</span><button class="icon-button" aria-label="Next page" :disabled="currentPage >= totalPages || loading" @click="loadPosts(currentPage + 1)"><ChevronRight :size="16" /></button></div></div>
+        <div class="posts-table-wrap"><table class="posts-table">
+            <thead><tr><th><input type="checkbox" aria-label="Select all posts" :checked="allSelected" @change="selectedIds = $event.target.checked ? posts.map((post) => post._id) : []" /></th><th>Title</th><th v-if="columns.author">Author</th><th v-if="columns.category">Categories</th><th v-if="columns.tags">Tags</th><th v-if="columns.comments">Comments</th><th v-if="columns.date">Date</th></tr></thead>
+            <tbody>
+                <tr v-if="loading"><td :colspan="columnCount" class="posts-empty">Loading posts...</td></tr>
+                <tr v-for="post in posts" :key="post._id"><td><input v-model="selectedIds" type="checkbox" :value="post._id" :aria-label="`Select ${post.title}`" /></td>
+                    <td><RouterLink class="posts-title-link" :to="`/posts/${post._id}/edit`">{{ post.title || '(no title)' }}</RouterLink><span v-if="post.status !== 'publish'"> — {{ post.status === 'trash' ? 'Trash' : 'Draft' }}</span><div class="posts-row-actions"><RouterLink :to="`/posts/${post._id}/edit`">Edit</RouterLink><template v-if="post.status === 'trash'"><button @click="setStatus(post, 'draft')">Restore</button><button class="is-danger" @click="deletePost(post)">Delete permanently</button></template><template v-else><button @click="setStatus(post, 'trash')">Trash</button></template></div></td>
+                    <td v-if="columns.author">admin</td><td v-if="columns.category">{{ post.category || 'Uncategorized' }}</td><td v-if="columns.tags">{{ (post.tags || []).join(', ') || '—' }}</td><td v-if="columns.comments">{{ post.commentsCount || 0 }}</td><td v-if="columns.date"><span>{{ post.status === 'publish' ? 'Published' : 'Last Modified' }}</span><br />{{ formatDate(post.updatedAt || post.createdAt) }}</td>
+                </tr>
+                <tr v-if="!loading && !posts.length"><td :colspan="columnCount" class="posts-empty">No posts found.</td></tr>
+            </tbody>
+        </table></div>
+    </section>
 </template>
 
 <style lang="scss" scoped>
-.screen-header {
-  min-height: 50px;
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-
-  &__title {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-  }
-
-  &__utility {
-    display: flex;
-    gap: 7px;
-    margin-top: -1px;
-
-    button {
-      display: inline-flex;
-      align-items: center;
-      gap: 5px;
-      padding: 6px 9px;
-      border: 1px solid #c3c4c7;
-      border-top: 0;
-      border-radius: 0 0 3px 3px;
-      color: #50575e;
-      background: #f6f7f7;
-    }
-  }
-}
-
-h1 {
-  margin: 0;
-  font-size: 23px;
-  line-height: 1.3;
-  font-weight: 400;
-}
-
-.list-toolbar,
-.filter-toolbar,
-.bottom-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.list-toolbar {
-  min-height: 39px;
-}
-
-.status-tabs {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: #8c8f94;
-
-  button {
-    padding: 0;
-    border: 0;
-    color: var(--wp-blue);
-    background: transparent;
-
-    &:hover {
-      color: #1d2327 !important;
-    }
-
-    span {
-      color: var(--wp-muted);
-      font-weight: 400;
-    }
-  }
-
-  &__active {
-    color: #1d2327 !important;
-    font-weight: 600;
-  }
-}
-
-.search-form {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-
-  input {
-    width: 210px;
-    height: 30px;
-    padding: 3px 7px;
-    border: 1px solid #8c8f94;
-    border-radius: 2px;
-    background: white;
-  }
-
-  .button {
-    min-height: 30px;
-  }
-}
-
-.filter-toolbar,
-.bottom-toolbar {
-  gap: 14px;
-  min-height: 42px;
-
-  select {
-    height: 30px;
-    padding: 3px 27px 3px 8px;
-    border: 1px solid #8c8f94;
-    border-radius: 2px;
-    color: #2c3338;
-    background: #fff;
-  }
-}
-
-.filter-toolbar {
-  &__actions,
-  &__filters {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-  }
-
-  &__actions select {
-    width: 100px;
-  }
-
-  &__filters select {
-    min-width: 110px;
-  }
-}
-
-.bottom-toolbar select {
-  width: 100px;
-}
-
-.result-count {
-  margin-left: auto;
-  color: #646970;
-  white-space: nowrap;
-}
-
-.posts-table-wrap {
-  width: 100%;
-  overflow-x: auto;
-}
-
-.posts-table {
-  width: 100%;
-  border-spacing: 0;
-  border: 1px solid #c3c4c7;
-  background: #fff;
-  text-align: left;
-
-  th,
-  td {
-    padding: 9px 10px;
-    border-bottom: 1px solid #c3c4c7;
-    vertical-align: middle;
-  }
-
-  thead th,
-  tfoot th {
-    height: 31px;
-    padding-top: 6px;
-    padding-bottom: 6px;
-    font-weight: 400;
-  }
-
-  tfoot th {
-    border-bottom: 0;
-  }
-
-  th:first-child,
-  td:first-child {
-    padding-left: 8px;
-  }
-
-  tbody tr:nth-child(odd) {
-    background: #f6f7f7;
-  }
-
-  tbody tr:hover {
-    background: #f0f6fc;
-  }
-
-  .check-column {
-    width: 34px;
-  }
-
-  input[type="checkbox"] {
-    width: 16px;
-    height: 16px;
-    margin: 0;
-    vertical-align: middle;
-    accent-color: var(--wp-blue);
-  }
-
-  th:not(.check-column):not(.title-column) {
-    width: 15%;
-  }
-}
-
-.title-column {
-  min-width: 230px;
-  width: 38%;
-}
-
-.sort-button {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  padding: 0;
-  border: 0;
-  color: #50575e;
-  background: transparent;
-  font-weight: 400;
-
-  &--active {
-    color: var(--wp-blue);
-  }
-}
-
-.post-title {
-  padding: 0;
-  border: 0;
-  color: var(--wp-blue);
-  background: transparent;
-  font-weight: 600;
-  text-align: left;
-
-  &:hover {
-    color: var(--wp-blue-dark);
-  }
-}
-
-.post-title-line {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.status-badge {
-  padding: 2px 6px;
-  border: 1px solid #c3c4c7;
-  border-radius: 2px;
-  color: #50575e;
-  background: #f6f7f7;
-  font-size: 11px;
-
-  &--trash {
-    color: #b32d2e;
-    background: #fcf0f1;
-  }
-}
-
-.row-actions {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-top: 4px;
-  color: #c3c4c7;
-  font-size: 12px;
-  opacity: 0;
-  transition: opacity .12s ease;
-
-  .post-row:hover &,
-  .post-row:focus-within & {
-    opacity: 1;
-  }
-
-  button {
-    display: inline-flex;
-    align-items: center;
-    gap: 3px;
-    padding: 0;
-    border: 0;
-    color: var(--wp-blue);
-    background: transparent;
-
-    &:hover {
-      color: var(--wp-blue-dark);
-    }
-  }
-
-  .row-actions__delete {
-    color: #b32d2e;
-  }
-}
-
-.date-status {
-  color: #646970;
-}
-
-.table-message {
-  height: 64px;
-  color: #646970;
-  text-align: center;
-
-  &--error {
-    display: table-cell;
-    color: #b32d2e;
-
-    span {
-      margin-right: 10px;
-    }
-  }
-}
-
-.bottom-toolbar {
-  min-height: 48px;
-  align-items: flex-start;
-  padding-top: 6px;
-}
-
-@media (max-width: 900px) {
-  .filter-toolbar {
-    flex-wrap: wrap;
-    padding: 6px 0;
-
-    &__filters {
-      order: 2;
-    }
-  }
-
-  .result-count {
-    order: 3;
-  }
-
-  .title-column {
-    min-width: 210px;
-  }
-
-  .posts-table th:not(.check-column):not(.title-column) {
-    min-width: 100px;
-  }
-}
-
-@media (max-width: 640px) {
-  .screen-header {
-    min-height: 48px;
-
-    &__utility {
-      display: none;
-    }
-  }
-
-  h1 {
-    font-size: 21px;
-  }
-
-  .list-toolbar {
-    align-items: flex-start;
-    flex-direction: column;
-    gap: 10px;
-    padding: 4px 0 8px;
-  }
-
-  .search-form {
-    width: 100%;
-
-    input {
-      flex: 1;
-      min-width: 80px;
-    }
-
-    .button {
-      flex-shrink: 0;
-    }
-  }
-
-  .filter-toolbar {
-    align-items: flex-start;
-
-    &__filters {
-      width: 100%;
-      flex-wrap: wrap;
-
-      select {
-        flex: 1;
-        min-width: 100px;
-      }
-
-      .button {
-        flex-shrink: 0;
-      }
-    }
-  }
-
-  .posts-table {
-    min-width: 690px;
-
-    .title-column {
-      width: 270px;
-    }
-  }
-
-  .row-actions {
-    opacity: 1;
-  }
-}
+.posts-screen { min-width: 0; color: #1d2327; }
+.posts-screen__tools { display: flex; justify-content: flex-end; min-height: 34px; }
+.posts-heading { margin: 8px 0 17px; }
+.posts-heading > div { display: flex; align-items: center; gap: 12px; }
+.posts-heading h1 { margin: 0; font-size: 23px; font-weight: 400; }
+.posts-status { display: flex; gap: 5px; margin-top: 12px; }
+.posts-status button { padding: 0; border: 0; color: #2271b1; background: transparent; }
+.posts-status .is-active { color: #1d2327; }
+.posts-status span { margin-left: 5px; color: #8c8f94; }
+.posts-options { display: flex; align-items: flex-start; gap: 36px; padding: 15px; border: 1px solid #c3c4c7; background: #fff; }
+.posts-options > div { display: flex; flex-wrap: wrap; gap: 15px; }
+.posts-options h2 { width: 100%; font-size: 13px; }
+.posts-options label { display: flex; align-items: center; gap: 5px; }
+.posts-options input[type=number] { width: 64px; padding: 5px; }
+.posts-toolbar,.posts-toolbar__filters,.posts-search,.posts-summary,.posts-pagination { display: flex; align-items: center; }
+.posts-toolbar { justify-content: space-between; gap: 12px; margin: 12px 0 8px; }
+.posts-toolbar__filters,.posts-search { gap: 7px; }
+.posts-toolbar select,.posts-search input { min-height: 30px; padding: 4px 8px; border: 1px solid #8c8f94; background: white; }
+.posts-search input { width: 160px; }
+.posts-summary { justify-content: space-between; color: #646970; margin-bottom: 5px; }
+.posts-pagination { gap: 7px; }
+.posts-table-wrap { overflow-x: auto; border: 1px solid #c3c4c7; background: white; }
+.posts-table { width: 100%; border-collapse: collapse; text-align: left; }
+.posts-table th,.posts-table td { min-width: 70px; padding: 9px 10px; border-bottom: 1px solid #dcdcde; vertical-align: top; }
+.posts-table th { font-weight: 500; }
+.posts-table th:first-child,.posts-table td:first-child { width: 34px; min-width: 34px; }
+.posts-table tbody tr:nth-child(odd) { background: #f6f7f7; }
+.posts-title-link { font-weight: 600; }
+.posts-row-actions { display: flex; gap: 8px; margin-top: 5px; font-size: 12px; }
+.posts-row-actions button { padding: 0; border: 0; color: #2271b1; background: transparent; }
+.posts-row-actions .is-danger { color: #b32d2e; }
+.posts-empty { height: 54px; text-align: center; color: #646970; }
+.posts-error { display: flex; justify-content: space-between; align-items: center; margin: 10px 0; padding: 9px 12px; border-left: 4px solid #d63638; background: #fff; }
+@media (max-width: 850px) { .posts-toolbar { align-items: flex-start; flex-direction: column; } .posts-toolbar__filters { flex-wrap: wrap; } }
+@media (max-width: 560px) { .posts-options { flex-direction: column; gap: 18px; } .posts-search { width: 100%; } .posts-search input { flex: 1; min-width: 0; } }
 </style>

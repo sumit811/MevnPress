@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const slugify = require('slugify');
 
 const postSchema = new mongoose.Schema({
   title: { 
@@ -30,6 +31,16 @@ const postSchema = new mongoose.Schema({
     type: String, 
     default: 'Uncategorized' 
   }, // Relevant for posts, optional for pages
+
+  tags: {
+    type: [String],
+    default: []
+  },
+
+  featuredImage: {
+    type: String,
+    default: ''
+  },
   
   status: { 
     type: String, 
@@ -49,5 +60,12 @@ const postSchema = new mongoose.Schema({
 
 // Indexing for rapid lookups
 postSchema.index({ slug: 1, type: 1 });
+postSchema.index({ type: 1, status: 1, updatedAt: -1 });
+
+postSchema.pre('validate', function generateSlug() {
+  if (!this.slug && this.title) {
+    this.slug = slugify(this.title, { lower: true, strict: true });
+  }
+});
 
 module.exports = mongoose.model('Post', postSchema);
