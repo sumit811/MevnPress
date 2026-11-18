@@ -1,3 +1,127 @@
+<template>
+  <section class="users-page" aria-labelledby="users-title">
+    <header class="screen-header users-heading">
+      <h1 id="users-title">Users</h1>
+      <button class="button button--primary-outline" type="button" @click="router.push('/users/new')">
+        <UserRoundPlus :size="16" /> Add New User
+      </button>
+    </header>
+
+    <nav class="role-filters" aria-label="Filter users by role">
+      <button
+        v-for="role in ['All', ...roles]"
+        :key="role"
+        type="button"
+        :class="{ 'role-filters__active': selectedRole === role }"
+        @click="selectedRole = role"
+      >{{ role }} <span>({{ roleCounts[role] }})</span></button>
+    </nav>
+
+    <div v-if="pageError" class="page-error" role="alert">
+      <span>{{ pageError }}</span>
+      <button class="button" type="button" @click="loadUsers">Retry</button>
+    </div>
+
+    <div class="users-toolbar">
+      <div class="table-toolbar__left">
+        <div class="bulk-actions">
+          <label class="visually-hidden" for="bulk-action">Bulk action</label>
+          <select id="bulk-action" v-model="bulkAction" class="role-select">
+            <option value="">Bulk actions</option>
+            <option value="delete">Delete</option>
+          </select>
+          <button class="button" type="button" :disabled="selectedUsers.length === 0 || !bulkAction" @click="applyBulkAction">Apply</button>
+        </div>
+        <div class="change-role">
+          <label class="visually-hidden" for="pages-date-filter">Filter by date</label>
+          <select id="pages-date-filter" v-model="changeRole" class="toolbar-select role-select">
+            <option value="" selected>Change role to ...</option>
+            <option v-for="option in roles" :key="option" :value="option">{{ option }}</option>
+          </select>
+          <button class="button" type="button" @click="loadPages(1)">Change</button>
+        </div>
+      </div>
+      <form class="search-form" role="search" @submit.prevent>
+        <label class="visually-hidden" for="user-search">Search users</label>
+        <input id="user-search" v-model="search" type="search" placeholder="Search users" />
+        <button class="button" type="submit" aria-label="Search users"><Search :size="16" /></button>
+      </form>
+      <p class="result-count">{{ filteredUsers.length }} {{ filteredUsers.length === 1 ? 'user' : 'users' }}</p>
+    </div>
+
+    <div class="users-table-wrap">
+      <table class="users-table">
+        <thead>
+          <tr>
+            <th class="check-column"><input type="checkbox" aria-label="Select all visible users" :checked="allVisibleSelected" @change="toggleVisibleUsers" /></th>
+            <th scope="col">Username</th>
+            <th scope="col">Name</th>
+            <th scope="col">Email</th>
+            <th scope="col">Role</th>
+            <th scope="col" class="posts-column">Posts</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-if="isLoading">
+            <td class="empty-state" colspan="6">Loading users...</td>
+          </tr>
+          <tr v-for="user in filteredUsers" :key="user.id">
+            <td class="check-column"><input v-model="selectedUsers" type="checkbox" :value="user.id" :aria-label="`Select ${user.username}`" /></td>
+            <td>
+              <strong class="username">{{ user.username }}</strong>
+              <div class="row-actions"><button type="button" @click="openEditDialog(user)">Edit</button><span>|</span><button class="row-actions__delete" type="button" @click="deleteUsers([user.id])">Delete</button></div>
+            </td>
+            <td>{{ user.name }}</td>
+            <td><a :href="`mailto:${user.email}`">{{ user.email }}</a></td>
+            <td>{{ user.role }}</td>
+            <td class="posts-column"><a href="#posts">{{ user.posts }}</a></td>
+          </tr>
+          <tr v-if="!isLoading && filteredUsers.length === 0">
+            <td class="empty-state" colspan="6">{{ pageError ? 'Users could not be loaded.' : 'No users found.' }}</td>
+          </tr>
+        </tbody>
+        <tfoot>
+          <tr>
+            <th class="check-column"><input type="checkbox" aria-label="Select all visible users" :checked="allVisibleSelected" @change="toggleVisibleUsers" /></th>
+            <th scope="col">Username</th>
+            <th scope="col">Name</th>
+            <th scope="col">Email</th>
+            <th scope="col">Role</th>
+            <th scope="col" class="posts-column">Posts</th>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+
+    <!-- <div v-if="isDialogOpen" class="dialog-backdrop" @click.self="isDialogOpen = false">
+      <section class="user-dialog" role="dialog" aria-modal="true" aria-labelledby="user-dialog-title">
+        <header class="dialog-header">
+          <h2 id="user-dialog-title">{{ editingUserId ? 'Edit User' : 'Add New User' }}</h2>
+          <button class="icon-button" type="button" aria-label="Close dialog" @click="isDialogOpen = false"><X :size="18" /></button>
+        </header>
+        <form class="user-form" @submit.prevent="saveUser">
+          <p v-if="formError" class="form-error" role="alert">{{ formError }}</p>
+          <label for="user-username">Username <span>(required)</span></label>
+          <input id="user-username" v-model="form.username" autocomplete="username" required />
+          <label for="user-email">Email <span>(required)</span></label>
+          <input id="user-email" v-model="form.email" type="email" autocomplete="email" required />
+          <div class="name-fields">
+            <div><label for="user-first-name">First name</label><input id="user-first-name" v-model="form.firstName" autocomplete="given-name" /></div>
+            <div><label for="user-last-name">Last name</label><input id="user-last-name" v-model="form.lastName" autocomplete="family-name" /></div>
+          </div>
+          <label for="user-role">Role</label>
+          <select id="user-role" v-model="form.role">
+            <option v-for="role in roles" :key="role">{{ role }}</option>
+          </select>
+          <footer class="dialog-actions">
+            <button class="button" type="button" @click="isDialogOpen = false">Cancel</button>
+            <button class="button button--primary" type="submit">{{ editingUserId ? 'Save User' : 'Add New User' }}</button>
+          </footer>
+        </form>
+      </section>
+    </div> -->
+  </section>
+</template>
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue';
 import { Search, UserRoundPlus, X } from '@lucide/vue';
@@ -11,6 +135,7 @@ const pageError = ref('');
 const search = ref('');
 const selectedRole = ref('All');
 const bulkAction = ref('');
+const changeRole = ref('');
 const selectedUsers = ref([]);
 const isDialogOpen = ref(false);
 const editingUserId = ref(null);
@@ -145,123 +270,12 @@ function applyBulkAction() {
 
 onMounted(loadUsers);
 </script>
-
-<template>
-  <section class="users-page" aria-labelledby="users-title">
-    <header class="screen-header users-heading">
-      <h1 id="users-title">Users</h1>
-      <button class="button button--primary-outline" type="button" @click="router.push('/users/new')">
-        <UserRoundPlus :size="16" /> Add New User
-      </button>
-    </header>
-
-    <nav class="role-filters" aria-label="Filter users by role">
-      <button
-        v-for="role in ['All', ...roles]"
-        :key="role"
-        type="button"
-        :class="{ 'role-filters__active': selectedRole === role }"
-        @click="selectedRole = role"
-      >{{ role }} <span>({{ roleCounts[role] }})</span></button>
-    </nav>
-
-    <div v-if="pageError" class="page-error" role="alert">
-      <span>{{ pageError }}</span>
-      <button class="button" type="button" @click="loadUsers">Retry</button>
-    </div>
-
-    <div class="users-toolbar">
-      <div class="bulk-actions">
-        <label class="visually-hidden" for="bulk-action">Bulk action</label>
-        <select id="bulk-action" v-model="bulkAction" class="role-select">
-          <option value="">Bulk actions</option>
-          <option value="delete">Delete</option>
-        </select>
-        <button class="button" type="button" :disabled="selectedUsers.length === 0 || !bulkAction" @click="applyBulkAction">Apply</button>
-      </div>
-      <form class="search-form" role="search" @submit.prevent>
-        <label class="visually-hidden" for="user-search">Search users</label>
-        <input id="user-search" v-model="search" type="search" placeholder="Search users" />
-        <button class="button" type="submit" aria-label="Search users"><Search :size="16" /></button>
-      </form>
-      <p class="result-count">{{ filteredUsers.length }} {{ filteredUsers.length === 1 ? 'user' : 'users' }}</p>
-    </div>
-
-    <div class="users-table-wrap">
-      <table class="users-table">
-        <thead>
-          <tr>
-            <th class="check-column"><input type="checkbox" aria-label="Select all visible users" :checked="allVisibleSelected" @change="toggleVisibleUsers" /></th>
-            <th scope="col">Username</th>
-            <th scope="col">Name</th>
-            <th scope="col">Email</th>
-            <th scope="col">Role</th>
-            <th scope="col" class="posts-column">Posts</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-if="isLoading">
-            <td class="empty-state" colspan="6">Loading users...</td>
-          </tr>
-          <tr v-for="user in filteredUsers" :key="user.id">
-            <td class="check-column"><input v-model="selectedUsers" type="checkbox" :value="user.id" :aria-label="`Select ${user.username}`" /></td>
-            <td>
-              <strong class="username">{{ user.username }}</strong>
-              <div class="row-actions"><button type="button" @click="openEditDialog(user)">Edit</button><span>|</span><button class="row-actions__delete" type="button" @click="deleteUsers([user.id])">Delete</button></div>
-            </td>
-            <td>{{ user.name }}</td>
-            <td><a :href="`mailto:${user.email}`">{{ user.email }}</a></td>
-            <td>{{ user.role }}</td>
-            <td class="posts-column"><a href="#posts">{{ user.posts }}</a></td>
-          </tr>
-          <tr v-if="!isLoading && filteredUsers.length === 0">
-            <td class="empty-state" colspan="6">{{ pageError ? 'Users could not be loaded.' : 'No users found.' }}</td>
-          </tr>
-        </tbody>
-        <tfoot>
-          <tr>
-            <th class="check-column"><input type="checkbox" aria-label="Select all visible users" :checked="allVisibleSelected" @change="toggleVisibleUsers" /></th>
-            <th scope="col">Username</th>
-            <th scope="col">Name</th>
-            <th scope="col">Email</th>
-            <th scope="col">Role</th>
-            <th scope="col" class="posts-column">Posts</th>
-          </tr>
-        </tfoot>
-      </table>
-    </div>
-
-    <!-- <div v-if="isDialogOpen" class="dialog-backdrop" @click.self="isDialogOpen = false">
-      <section class="user-dialog" role="dialog" aria-modal="true" aria-labelledby="user-dialog-title">
-        <header class="dialog-header">
-          <h2 id="user-dialog-title">{{ editingUserId ? 'Edit User' : 'Add New User' }}</h2>
-          <button class="icon-button" type="button" aria-label="Close dialog" @click="isDialogOpen = false"><X :size="18" /></button>
-        </header>
-        <form class="user-form" @submit.prevent="saveUser">
-          <p v-if="formError" class="form-error" role="alert">{{ formError }}</p>
-          <label for="user-username">Username <span>(required)</span></label>
-          <input id="user-username" v-model="form.username" autocomplete="username" required />
-          <label for="user-email">Email <span>(required)</span></label>
-          <input id="user-email" v-model="form.email" type="email" autocomplete="email" required />
-          <div class="name-fields">
-            <div><label for="user-first-name">First name</label><input id="user-first-name" v-model="form.firstName" autocomplete="given-name" /></div>
-            <div><label for="user-last-name">Last name</label><input id="user-last-name" v-model="form.lastName" autocomplete="family-name" /></div>
-          </div>
-          <label for="user-role">Role</label>
-          <select id="user-role" v-model="form.role">
-            <option v-for="role in roles" :key="role">{{ role }}</option>
-          </select>
-          <footer class="dialog-actions">
-            <button class="button" type="button" @click="isDialogOpen = false">Cancel</button>
-            <button class="button button--primary" type="submit">{{ editingUserId ? 'Save User' : 'Add New User' }}</button>
-          </footer>
-        </form>
-      </section>
-    </div> -->
-  </section>
-</template>
-
 <style lang="scss" scoped>
+.table-toolbar__left {
+  display: flex;
+  gap: 7px;
+}
+
 .users-page {
   min-width: 0;
 }

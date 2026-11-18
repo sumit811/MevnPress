@@ -147,7 +147,13 @@ onMounted(() => { loadCategories(); loadPosts(1); });
         <div v-if="errorMessage" class="posts-error" role="alert">{{ errorMessage }} <button class="button" type="button" @click="loadPosts(currentPage)">Retry</button></div>
         <div class="posts-toolbar">
             <div class="posts-toolbar__filters">
-                <select v-model="bulkAction" aria-label="Bulk action"><option value="">Bulk actions</option><option value="trash">Move to Trash</option><option value="publish">Publish</option><option value="draft">Set to Draft</option><option value="delete">Delete permanently</option></select>
+                <select v-model="bulkAction" aria-label="Bulk action">
+                    <option value="">Bulk actions</option>
+                    <option value="trash">Move to Trash</option>
+                    <option value="publish">Publish</option>
+                    <option value="draft">Set to Draft</option>
+                    <option value="delete">Delete permanently</option>
+                </select>
                 <button class="button" type="button" :disabled="!bulkAction || !selectedIds.length" @click="applyBulkAction">Apply</button>
                 <select v-model="selectedDate" aria-label="Filter by date"><option value="">All dates</option><option v-for="date in dates" :key="date.value" :value="date.value">{{ date.label }}</option></select>
                 <select v-model="selectedCategory" aria-label="Filter by category"><option value="">All Categories</option><option v-for="category in categories" :key="category._id" :value="category.name">{{ category.name }}</option></select>

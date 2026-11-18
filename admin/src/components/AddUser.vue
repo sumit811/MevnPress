@@ -1,160 +1,49 @@
-
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue';
-import { Search, UserRoundPlus, X } from '@lucide/vue';
+import { reactive, ref } from 'vue';
 import { useRouter } from 'vue-router';
 
 const router = useRouter();
 const roles = ['Administrator', 'Editor', 'Author', 'Contributor', 'Subscriber'];
-const users = ref([]);
-const isLoading = ref(true);
-const pageError = ref('');
-const search = ref('');
-const selectedRole = ref('All');
-const bulkAction = ref('');
-const selectedUsers = ref([]);
-const isDialogOpen = ref(false);
-const editingUserId = ref(null);
 const formError = ref('');
 const form = reactive({ username: '', email: '', firstName: '', lastName: '', role: 'Subscriber' });
 
-function formatUser(user) {
-  return {
-    ...user,
-    id: user._id,
-    name: [user.firstName, user.lastName].filter(Boolean).join(' ') || user.username,
-    posts: 0
-  };
-}
-
-async function requestUsers(path = '', options = {}) {
-  const response = await fetch(`/api/admin/users${path}`, {
-    ...options,
-    headers: { 'Content-Type': 'application/json', ...options.headers }
-  });
-  const result = await response.json();
-  if (!response.ok) throw new Error(result.error || 'The user request failed.');
-  return result;
-}
-
-async function loadUsers() {
-  isLoading.value = true;
-  pageError.value = '';
-  try {
-    const records = await requestUsers();
-    users.value = records.map(formatUser);
-    selectedUsers.value = [];
-  } catch (error) {
-    pageError.value = error.message || 'Could not load users.';
-  } finally {
-    isLoading.value = false;
-  }
-}
-
-const roleCounts = computed(() => ({
-  All: users.value.length,
-  ...Object.fromEntries(roles.map((role) => [role, users.value.filter((user) => user.role === role).length]))
-}));
-
-const filteredUsers = computed(() => {
-  const query = search.value.trim().toLowerCase();
-  return users.value.filter((user) => {
-    const matchesRole = selectedRole.value === 'All' || user.role === selectedRole.value;
-    const matchesSearch = !query || [user.username, user.name, user.email].some((value) => value.toLowerCase().includes(query));
-    return matchesRole && matchesSearch;
-  });
-});
-
-const allVisibleSelected = computed(() => filteredUsers.value.length > 0 && filteredUsers.value.every((user) => selectedUsers.value.includes(user.id)));
-
-function toggleVisibleUsers(event) {
-  const visibleIds = filteredUsers.value.map((user) => user.id);
-  selectedUsers.value = event.target.checked
-    ? [...new Set([...selectedUsers.value, ...visibleIds])]
-    : selectedUsers.value.filter((id) => !visibleIds.includes(id));
-}
-
-function resetForm() {
-  Object.assign(form, { username: '', email: '', firstName: '', lastName: '', role: 'Subscriber' });
-  formError.value = '';
-  editingUserId.value = null;
-}
-
-function openAddDialog() {
-  resetForm();
-  isDialogOpen.value = true;
-}
-
-function openEditDialog(user) {
-  Object.assign(form, {
-    username: user.username,
-    email: user.email,
-    firstName: user.firstName || '',
-    lastName: user.lastName || '',
-    role: user.role
-  });
-  editingUserId.value = user.id;
-  formError.value = '';
-  isDialogOpen.value = true;
-}
-
 async function saveUser() {
-  const username = form.username.trim();
-  const email = form.email.trim();
-  const duplicate = users.value.some((user) => user.username.toLowerCase() === username.toLowerCase() && user.id !== editingUserId.value);
-
-  if (duplicate) {
-    formError.value = 'That username is already in use.';
-    return;
-  }
-
   const userData = {
-    username,
-    email,
+    username: form.username.trim(),
+    email: form.email.trim(),
     firstName: form.firstName.trim(),
     lastName: form.lastName.trim(),
     role: form.role
   };
 
   try {
-    await requestUsers(editingUserId.value ? `/${editingUserId.value}` : '', {
-      method: editingUserId.value ? 'PUT' : 'POST',
+    const response = await fetch('/api/admin/users', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(userData)
     });
-    isDialogOpen.value = false;
-    resetForm();
-    await loadUsers();
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || 'Could not save this user.');
+
+    Object.assign(form, { username: '', email: '', firstName: '', lastName: '', role: 'Subscriber' });
+    formError.value = '';
   } catch (error) {
     formError.value = error.message || 'Could not save this user.';
   }
 }
 
-async function deleteUsers(ids) {
-  try {
-    await Promise.all(ids.map((id) => requestUsers(`/${id}`, { method: 'DELETE' })));
-    await loadUsers();
-  } catch (error) {
-    await loadUsers();
-    pageError.value = error.message || 'Could not delete the selected users.';
-  }
+function cancelAddUser() {
+  Object.assign(form, { username: '', email: '', firstName: '', lastName: '', role: 'Subscriber' });
+  formError.value = '';
+  setTimeout(( )=> {
+    router.push('/users');
+  },2000);
 }
-
-function applyBulkAction() {
-  if (bulkAction.value === 'delete') deleteUsers(selectedUsers.value);
-  bulkAction.value = '';
-}
-
-onMounted(loadUsers);
 </script>
 <template>
     <div>
         <h1>Add User</h1>
         <p>Create a brand new user and add them to this site.</p>
-        <!-- Add user form goes here -->
-        <!-- <header class="dialog-header">
-          <h2 id="user-dialog-title">{{ editingUserId ? 'Edit User' : 'Add New User' }}</h2>
-          <button class="icon-button" type="button" aria-label="Close dialog" @click="isDialogOpen = false"><X :size="18" /></button>
-        </header> -->
         <form class="user-form" @submit.prevent="saveUser">
           <p v-if="formError" class="form-error" role="alert">{{ formError }}</p>
           <label for="user-username">Username <span>(required)</span></label>
@@ -170,8 +59,8 @@ onMounted(loadUsers);
             <option v-for="role in roles" :key="role">{{ role }}</option>
           </select>
           <footer class="dialog-actions">
-            <button class="button" type="button" @click="isDialogOpen = false">Cancel</button>
-            <button class="button button--primary" type="submit">{{ editingUserId ? 'Save User' : 'Add New User' }}</button>
+            <button class="button" type="button" @click="cancelAddUser">Cancel</button>
+            <button class="button button--primary" type="submit">Add New User</button>
           </footer>
         </form>
     </div>
