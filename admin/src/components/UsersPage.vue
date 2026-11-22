@@ -38,7 +38,7 @@
             <option value="" selected>Change role to ...</option>
             <option v-for="option in roles" :key="option" :value="option">{{ option }}</option>
           </select>
-          <button class="button" type="button" @click="loadPages(1)">Change</button>
+          <button class="button" type="button" @click="changeUserRole()">Change</button>
         </div>
       </div>
       <form class="search-form" role="search" @submit.prevent>
@@ -126,8 +126,10 @@
 import { computed, onMounted, reactive, ref } from 'vue';
 import { Search, UserRoundPlus, X } from '@lucide/vue';
 import { useRouter } from 'vue-router';
+import { useNotificationStore } from '../stores/notifications';
 
 const router = useRouter();
+const notifications = useNotificationStore();
 const roles = ['Administrator', 'Editor', 'Author', 'Contributor', 'Subscriber'];
 const users = ref([]);
 const isLoading = ref(true);
@@ -161,6 +163,29 @@ async function requestUsers(path = '', options = {}) {
   return result;
 }
 
+async function changeUserRole() {
+  if (!changeRole.value || selectedUsers.value.length === 0) {
+    notifications.error(selectedUsers.value.length === 0 ? 'Select one or more users.' : 'Choose a role.');
+    return;
+  }
+  const count = selectedUsers.value.length;
+  const role = changeRole.value;
+  try {
+    await Promise.all(selectedUsers.value.map((id) =>
+      requestUsers(`/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify({ role })
+      })
+    ));
+    changeRole.value = '';
+    await loadUsers();
+    notifications.success(`Changed role to ${role} for ${count} selected user${count === 1 ? '' : 's'}.`);
+  } catch (error) {
+    await loadUsers();
+    notifications.error(error.message || 'Could not change the selected users\' roles.');
+  }
+}
+
 async function loadUsers() {
   isLoading.value = true;
   pageError.value = '';
@@ -170,6 +195,7 @@ async function loadUsers() {
     selectedUsers.value = [];
   } catch (error) {
     pageError.value = error.message || 'Could not load users.';
+    notifications.error(pageError.value);
   } finally {
     isLoading.value = false;
   }
@@ -241,6 +267,7 @@ async function saveUser() {
   };
 
   try {
+    const action = editingUserId.value ? 'updated' : 'created';
     await requestUsers(editingUserId.value ? `/${editingUserId.value}` : '', {
       method: editingUserId.value ? 'PUT' : 'POST',
       body: JSON.stringify(userData)
@@ -248,18 +275,23 @@ async function saveUser() {
     isDialogOpen.value = false;
     resetForm();
     await loadUsers();
+    notifications.success(`User ${action} successfully.`);
   } catch (error) {
     formError.value = error.message || 'Could not save this user.';
+    notifications.error(formError.value);
   }
 }
 
 async function deleteUsers(ids) {
+  if (!window.confirm(ids.length === 1 ? 'Do you want to delete this user?' : `Do you want to delete ${ids.length} users?`)) return;
   try {
     await Promise.all(ids.map((id) => requestUsers(`/${id}`, { method: 'DELETE' })));
     await loadUsers();
+    notifications.success(`${ids.length} user${ids.length === 1 ? '' : 's'} deleted successfully.`);
   } catch (error) {
     await loadUsers();
     pageError.value = error.message || 'Could not delete the selected users.';
+    notifications.error(pageError.value);
   }
 }
 

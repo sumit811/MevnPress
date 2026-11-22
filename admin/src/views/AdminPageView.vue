@@ -3,6 +3,7 @@ import { ref } from 'vue';
 import AdminFooter from '../components/AdminFooter.vue';
 import AdminHeader from '../components/AdminHeader.vue';
 import AdminSidebar from '../components/AdminSidebar.vue';
+import NotificationBar from '../components/NotificationBar.vue';
 
 const isSidebarOpen = ref(false);
 </script>
@@ -13,6 +14,7 @@ const isSidebarOpen = ref(false);
     <AdminSidebar :is-open="isSidebarOpen" />
 
     <main class="main-content">
+      <NotificationBar />
       <router-view></router-view>
       <AdminFooter />
     </main>

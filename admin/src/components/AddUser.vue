@@ -1,8 +1,10 @@
 <script setup>
 import { reactive, ref } from 'vue';
 import { useRouter } from 'vue-router';
+import { useNotificationStore } from '../stores/notifications';
 
 const router = useRouter();
+const notifications = useNotificationStore();
 const roles = ['Administrator', 'Editor', 'Author', 'Contributor', 'Subscriber'];
 const formError = ref('');
 const form = reactive({ username: '', email: '', firstName: '', lastName: '', role: 'Subscriber' });
@@ -27,8 +29,10 @@ async function saveUser() {
 
     Object.assign(form, { username: '', email: '', firstName: '', lastName: '', role: 'Subscriber' });
     formError.value = '';
+    notifications.success('New user created successfully.');
   } catch (error) {
     formError.value = error.message || 'Could not save this user.';
+    notifications.error(formError.value);
   }
 }
 
